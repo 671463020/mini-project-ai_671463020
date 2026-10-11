@@ -215,33 +215,19 @@ with tab_sentiment:
                         res_json = response.json()
                         sentiment_data = res_json.get("sentiment", {})
                         
-                        polarity = sentiment_data.get("polarity", "").lower()
+                        polarity = str(sentiment_data.get("polarity", "")).lower()
                         score = sentiment_data.get("score", 0.0)
                         
                         # แสดงผลลัพธ์
                         col_r1, col_r2, col_r3 = st.columns(3)
                         with col_r1:
                             if polarity == "positive":
-                                st.markdown("""
-                                <div class="sentiment-card sentiment-pos">
-                                    <h2>😊 เชิงบวก (Positive)</h2>
-                                    <p>ข้อความแสดงความรู้สึกในแง่ดี ชื่นชม พอใจ</p>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                card_html = '<div class="sentiment-card sentiment-pos"><h2>😊 เชิงบวก (Positive)</h2><p>ข้อความแสดงความรู้สึกในแง่ดี ชื่นชม พอใจ</p></div>'
                             elif polarity == "negative":
-                                st.markdown("""
-                                <div class="sentiment-card sentiment-neg">
-                                    <h2>😡 เชิงลบ (Negative)</h2>
-                                    <p>ข้อความแสดงความรู้สึกไม่พอใจ ตำหนิ ผิดหวัง</p>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                card_html = '<div class="sentiment-card sentiment-neg"><h2>😡 เชิงลบ (Negative)</h2><p>ข้อความแสดงความรู้สึกไม่พอใจ ตำหนิ ผิดหวัง</p></div>'
                             else:
-                                st.markdown("""
-                                <div class="sentiment-card sentiment-neu">
-                                    <h2>😐 เป็นกลาง (Neutral)</h2>
-                                    <p>ข้อความบอกเล่าทั่วไป ไม่แสดงอารมณ์ชัดเจน</p>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                card_html = '<div class="sentiment-card sentiment-neu"><h2>😐 เป็นกลาง (Neutral)</h2><p>ข้อความบอกเล่าทั่วไป ไม่แสดงอารมณ์ชัดเจน</p></div>'
+                            st.markdown(card_html, unsafe_allow_html=True)
 
                         with col_r2:
                             st.metric("คะแนนความรู้สึก (Sentiment Score)", f"{score}")
@@ -292,7 +278,7 @@ with tab_tlex:
             st.warning("กรุณากรอกข้อความ")
         else:
             with st.spinner("กำลังตัดคำด้วย TLex+..."):
-                url = "https://api.aiforthai.in.th/tlex"
+                url = "https://api.aiforthai.in.th/tlexplus"
                 response, err = call_aiforthai_api(url, method="GET", params={"text": tlex_input})
                 
                 if err:
@@ -302,12 +288,13 @@ with tab_tlex:
                 else:
                     try:
                         res_json = response.json()
-                        # รองรับโครงสร้างผลลัพธ์ทั้งแบบ list หรือ dict
                         words = []
                         if isinstance(res_json, list):
                             words = res_json
                         elif isinstance(res_json, dict):
                             words = res_json.get("words", res_json.get("tokens", []))
+                            if not words and "tokenizer" in res_json:
+                                words = res_json["tokenizer"].get("words", [])
                             if not words and "output" in res_json:
                                 words = res_json["output"].split("|")
                         
@@ -351,9 +338,8 @@ with tab_ner:
             st.warning("กรุณาระบุข้อความ")
         else:
             with st.spinner("กำลังประมวลผล T-NER..."):
-                url = "https://api.aiforthai.in.th/t-ner"
-                # T-NER รองรับ POST request
-                response, err = call_aiforthai_api(url, method="POST", data={"text": ner_input})
+                url = "https://api.aiforthai.in.th/tner"
+                response, err = call_aiforthai_api(url, method="GET", params={"text": ner_input})
                 
                 if err:
                     st.error(f"❌ {err}")
@@ -365,7 +351,6 @@ with tab_ner:
                         st.write("---")
                         st.write("#### 🎯 ผลการวิเคราะห์เอนทิตี:")
                         
-                        # แสดงผลลัพธ์
                         with st.expander("📄 ดูผลลัพธ์ JSON ฉบับเต็ม", expanded=True):
                             st.json(res_json)
                     except Exception as e:
@@ -395,8 +380,7 @@ with tab_vaja:
                 response, err = call_aiforthai_api(
                     url, 
                     method="POST", 
-                    data={"text": vaja_text},
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    params={"text": vaja_text}
                 )
                 
                 if err:
@@ -404,22 +388,32 @@ with tab_vaja:
                 elif response.status_code != 200:
                     st.error(f"❌ API Error ({response.status_code}): {response.text}")
                 else:
-                    # ตรวจสอบว่าได้ไฟล์เสียงหรือไม่
-                    content_type = response.headers.get("content-type", "")
-                    if "audio" in content_type or len(response.content) > 200:
+                    try:
+                        res_json = response.json()
+                        audio_url = res_json.get("audio_url", "")
+                        
+                        if audio_url:
+                            # ดึงไฟล์เสียงจาก audio_url
+                            audio_res = requests.get(audio_url)
+                            if audio_res.status_code == 200:
+                                st.success("✅ สังเคราะห์เสียงพูดสำเร็จ!")
+                                st.audio(audio_res.content, format="audio/wav")
+                                
+                                st.download_button(
+                                    label="⬇️ ดาวน์โหลดไฟล์เสียง (.wav)",
+                                    data=audio_res.content,
+                                    file_name="speech_output.wav",
+                                    mime="audio/wav"
+                                )
+                            else:
+                                st.error("ไม่สามารถโหลดไฟล์เสียงจาก URL ได้")
+                        else:
+                            st.warning("ไม่พบ audio_url ในผลลัพธ์:")
+                            st.json(res_json)
+                    except Exception:
+                        # กรณี API คืนไฟล์เสียงตรงๆ (Binary)
                         st.success("✅ สังเคราะห์เสียงพูดสำเร็จ!")
                         st.audio(response.content, format="audio/wav")
-                        
-                        st.download_button(
-                            label="⬇️ ดาวน์โหลดไฟล์เสียง (.wav)",
-                            data=response.content,
-                            file_name="speech_output.wav",
-                            mime="audio/wav"
-                        )
-                    else:
-                        st.warning("ระบบตอบกลับมา แต่ไม่พบไฟล์เสียง ตรวจสอบรายละเอียดด้านล่าง:")
-                        st.text(response.text)
-
 # ----------------------------------------------------
 # 5. ทดสอบ API อื่นๆ ของ AIForThai (Custom API Explorer)
 # ----------------------------------------------------
@@ -454,7 +448,6 @@ with tab_custom:
                 params = None
                 data = None
                 
-                # แปลงข้อมูลตามชนิดที่เลือก
                 try:
                     if custom_params_type == "Raw JSON":
                         params = json.loads(custom_input_val)
@@ -462,7 +455,6 @@ with tab_custom:
                         try:
                             params = json.loads(custom_input_val)
                         except Exception:
-                            # fallback key=value
                             params = dict(item.split("=") for item in custom_input_val.split("&") if "=" in item)
                     else:
                         try:
